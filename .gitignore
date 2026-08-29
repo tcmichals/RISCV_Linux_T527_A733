@@ -1,0 +1,15 @@
+# CMake build trees
+build*/
+
+# Build artifacts
+*.elf
+*.map
+*.bin
+*.o
+*.obj
+*.a
+
+# Editor / OS
+.cache/
+compile_commands.json
+.DS_Store

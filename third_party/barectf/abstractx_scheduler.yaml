@@ -1,0 +1,40 @@
+--- !<tag:barectf.org,2020/3/config>
+# Source of truth for AbstractX scheduler tracing.
+# Generate the tracer and CTF metadata with BareCTF 3.1 or later.
+trace:
+  type:
+    $include:
+      - stdint.yaml
+      - stdmisc.yaml
+
+    # The RISC-V cycle counter is converted to nanoseconds by the platform.
+    native-byte-order: little-endian
+
+    clock-types:
+      default:
+        frequency: 1000000000
+        $c-type: uint64_t
+
+    data-stream-types:
+      default:
+        $is-default: true
+        $default-clock-type-name: default
+
+        event-record-types:
+          coroutine_continue_begin:
+            payload-field-type:
+              class: structure
+              members:
+                - coroutine_id: uint32
+                - priority: uint8
+                - scheduler_lane: uint8
+                - wake_reason: uint8
+
+          coroutine_continue_end:
+            payload-field-type:
+              class: structure
+              members:
+                - coroutine_id: uint32
+                - priority: uint8
+                - scheduler_lane: uint8
+                - outcome: uint8
