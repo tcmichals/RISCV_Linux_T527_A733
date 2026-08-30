@@ -131,9 +131,9 @@ SECTIONS
     } > SRAM_SHARED
 
     /* 7. BareCTF uses the SRAM buffer exported by the RemoteProc trace resource.
-     * Keep this address in sync with IPC_TRACE_BUFFER_ADDR and resource_table.c.
+     * Keep this address in sync with IPC_TRACE_BUFFER_ADDR (0x07136000) and resource_table.c.
      */
-    .trace_ctf_buffer 0x07138000 (NOLOAD) : {
+    .trace_ctf_buffer 0x07136000 (NOLOAD) : {
         *(.trace_ctf_buffer)
     } > SRAM_SHARED
 

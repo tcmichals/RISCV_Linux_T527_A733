@@ -31,11 +31,20 @@ public:
         volatile uint32_t SCH;         // 0x1C
     };
 
-    static inline void init(uint32_t baudrate = 115200) {
+    static inline void init(uint32_t baudrate = 115200, uint32_t parent_clock_hz = 24000000U) {
         auto* regs = get_regs();
+        if (parent_clock_hz == 0U) {
+            parent_clock_hz = 24000000U;
+        }
+        if (baudrate == 0U) {
+            baudrate = 115200U;
+        }
         
-        // 1. Configure Baud Rate (Assuming 24MHz APB clock)
-        uint32_t divisor = 24000000U / (16U * baudrate);
+        // 1. Configure Baud Rate from parent clock
+        uint32_t divisor = parent_clock_hz / (16U * baudrate);
+        if (divisor == 0U) {
+            divisor = 1U;
+        }
         regs->LCR = 0x80; // Enable DLAB
         regs->RBR_THR_DLL = divisor & 0xFF;
         regs->DLH_IER = (divisor >> 8) & 0xFF;
@@ -94,6 +103,25 @@ public:
         return AsyncReadAwaiter(buf);
     }
 
+    struct WriteRequest {
+        std::coroutine_handle<> handle;
+        std::span<const uint8_t> data;
+
+        WriteRequest() noexcept : handle(nullptr), data() {}
+        WriteRequest(std::coroutine_handle<> h, std::span<const uint8_t> d) noexcept
+            : handle(h), data(d) {}
+    };
+
+    // Coroutine domain producer: interrupts are masked for the enqueue.
+    static inline bool queue_write_request(std::coroutine_handle<> handle, std::span<const uint8_t> data) noexcept {
+        return pending_write_requests_.push(WriteRequest{handle, data});
+    }
+
+    // I/O domain consumer: called from the UART TX ISR, interrupts already masked.
+    static inline bool pop_write_request(WriteRequest& req) noexcept {
+        return pending_write_requests_.pop_from_isr(req);
+    }
+
     /* Asynchronous Coroutine Write Awaiter */
     struct AsyncWriteAwaiter {
         std::span<const uint8_t> src_data;
@@ -107,7 +135,7 @@ public:
 
         void await_suspend(std::coroutine_handle<> h) noexcept {
             handle = h;
-            tx_awaiting_handle_ = handle;
+            queue_write_request(h, src_data);
             start_tx_dma(src_data);
         }
 
@@ -146,10 +174,9 @@ public:
 
     // Called from DMA TX Completion ISR
     static inline void handle_tx_dma_isr() noexcept {
-        if (tx_awaiting_handle_) {
-            auto h = tx_awaiting_handle_;
-            tx_awaiting_handle_ = nullptr;
-            abstractx::IsrDispatcher::post(h);
+        WriteRequest req{};
+        if (pop_write_request(req)) {
+            abstractx::IsrDispatcher::post(req.handle);
         }
     }
 
@@ -168,7 +195,7 @@ private:
     }
 
     static inline DriverRequestQueue<ReadRequest, 8> pending_read_requests_{};
-    static inline std::coroutine_handle<> tx_awaiting_handle_{nullptr};
+    static inline DriverRequestQueue<WriteRequest, 8> pending_write_requests_{};
 };
 
 } // namespace hal

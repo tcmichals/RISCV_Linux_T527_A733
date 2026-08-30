@@ -20,21 +20,32 @@ The Linux 7.1 RemoteProc subsystem on Allwinner T527 (`sun55i`) and A733 (`sun60
             no-map;
         };
 
-        /* 16 KB SPSC TX Ring in Shared SRAM C (E907 -> Linux) */
-        vdev0vring0: vring0@7130000 {
-            reg = <0x0 0x07130000 0x0 0x00004000>;
+        /* 64 KB Shared SRAM C IPC Window */
+        riscv_boot_status: status@7130000 {
+            reg = <0x0 0x07130000 0x0 0x00001000>;
             no-map;
         };
 
-        /* 16 KB SPSC RX Ring in Shared SRAM C (Linux -> E907) */
+        riscv_clock_config: clock@7131000 {
+            reg = <0x0 0x07131000 0x0 0x00001000>;
+            no-map;
+        };
+
+        /* 8 KB SPSC TX Ring in Shared SRAM C (E906 -> Linux) */
+        vdev0vring0: vring0@7132000 {
+            reg = <0x0 0x07132000 0x0 0x00002000>;
+            no-map;
+        };
+
+        /* 8 KB SPSC RX Ring in Shared SRAM C (Linux -> E906) */
         vdev0vring1: vring1@7134000 {
-            reg = <0x0 0x07134000 0x0 0x00004000>;
+            reg = <0x0 0x07134000 0x0 0x00002000>;
             no-map;
         };
 
-        /* 32 KB BareCTF / Trace Buffer in SRAM C */
-        trace_buffer: trace@7138000 {
-            reg = <0x0 0x07138000 0x0 0x00008000>;
+        /* 32 KB RSC_TRACE / BareCTF Buffer in SRAM C */
+        trace_buffer: trace@7136000 {
+            reg = <0x0 0x07136000 0x0 0x00008000>;
             no-map;
         };
 

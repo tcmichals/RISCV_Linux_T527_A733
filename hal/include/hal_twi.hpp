@@ -84,11 +84,32 @@ public:
 
     enum class Unused : uint8_t { None };
 
-    static inline void init(uint32_t base, uint32_t clk_div = 0x11) noexcept {
+    static inline uint32_t compute_ccr(uint32_t target_scl_hz, uint32_t parent_clock_hz = 24000000U) noexcept {
+        if (target_scl_hz == 0U || parent_clock_hz == 0U) {
+            return 0x11; // ~300-400 kHz fallback
+        }
+        uint32_t best_diff = 0xFFFFFFFFU;
+        uint32_t best_ccr = 0x11;
+
+        for (uint32_t n = 0; n <= 7; ++n) {
+            for (uint32_t m = 0; m <= 7; ++m) {
+                const uint32_t divisor = 10U * (1U << n) * (m + 1U);
+                const uint32_t actual_scl = parent_clock_hz / divisor;
+                const uint32_t diff = actual_scl > target_scl_hz ? (actual_scl - target_scl_hz) : (target_scl_hz - actual_scl);
+                if (diff < best_diff) {
+                    best_diff = diff;
+                    best_ccr = ((n & 0x07U) << 3) | (m & 0x07U);
+                }
+            }
+        }
+        return best_ccr;
+    }
+
+    static inline void init(uint32_t base, uint32_t target_scl_hz = 400000U, uint32_t parent_clock_hz = 24000000U) noexcept {
         auto* r = regs(base);
         r->SRST = 1U;                       // soft reset
         while ((r->SRST & 1U) != 0U) { }
-        r->CCR = clk_div;                   // ~400 kHz from the 24 MHz source
+        r->CCR = compute_ccr(target_scl_hz, parent_clock_hz);
         r->EFR = 0U;
         r->LCR = 0U;
         r->CNTR = CNTR_BUS_EN | CNTR_INT_EN;

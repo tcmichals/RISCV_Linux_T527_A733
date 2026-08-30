@@ -75,7 +75,7 @@ configuration. Keep generated output separate from the handwritten legacy
 `third_party/barectf/barectf.c` until the firmware is switched to the generated
 API.
 
-The firmware trace resource is a 32 KB buffer at `0x07138000`, defined by
+The firmware trace resource is a 32 KB buffer at `0x07136000`, defined by
 `IPC_TRACE_BUFFER_ADDR`, placed by `.trace_ctf_buffer` in the linker script,
 and exported through the RemoteProc resource table. These three definitions
 must remain identical.

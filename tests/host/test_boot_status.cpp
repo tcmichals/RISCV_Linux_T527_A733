@@ -50,4 +50,23 @@ TEST(BootStatus, BuildsReadyStatusWithClockConfigurationIdentity) {
     CHECK_EQUAL(480000000U, status.riscv_core_hz);
 }
 
+TEST(BootStatus, BuildsCrashedStatusWithTrapCsrs) {
+    auto status = hal::boot::make_status(
+        hal::boot::State::Crashed,
+        hal::boot::FailureReason::UnexpectedTrap,
+        3U,
+        2U,
+        600000000U);
+    status.mcause = 0x00000007U; // store/AMO access fault
+    status.mepc = 0x07141A2CU;
+    status.mtval = 0x02000010U;
+
+    CHECK_TRUE(status.is_valid());
+    CHECK_EQUAL(static_cast<uint32_t>(hal::boot::State::Crashed), status.state);
+    CHECK_EQUAL(static_cast<uint32_t>(hal::boot::FailureReason::UnexpectedTrap), status.failure_reason);
+    CHECK_EQUAL(0x00000007U, status.mcause);
+    CHECK_EQUAL(0x07141A2CU, status.mepc);
+    CHECK_EQUAL(0x02000010U, status.mtval);
+}
+
 } // namespace

@@ -92,16 +92,22 @@ private:
     static inline uint32_t core_frequency_hz_{CPU_FREQ_HZ};
     static inline uint32_t timer_counter_hz_{CPU_FREQ_HZ};
     static inline volatile uint32_t timer_interrupt_count_{0U};
+    static inline uint64_t next_tick_mtime_{0U};
 
     static inline void set_timer_period(uint32_t period) noexcept {
         period_cycles_ = period;
-        arm_next_tick();
+        next_tick_mtime_ = read_mtime() + period_cycles_;
+        write_mtimecmp(next_tick_mtime_);
     }
 
     static inline void arm_next_tick() noexcept {
 #if defined(__riscv)
-        const uint64_t target = read_mtime() + period_cycles_;
-        write_mtimecmp(target);
+        next_tick_mtime_ += period_cycles_;
+        const uint64_t now = read_mtime();
+        if (next_tick_mtime_ <= now) {
+            next_tick_mtime_ = now + period_cycles_;
+        }
+        write_mtimecmp(next_tick_mtime_);
 #endif
     }
 

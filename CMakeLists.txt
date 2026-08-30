@@ -74,6 +74,22 @@ if(BUILD_RISCV_FIRMWARE)
     )
     target_link_options(platform_smoke_test.elf PRIVATE
         -T${LINKER_SCRIPT} -Wl,-Map=platform_smoke_test.map)
+
+    # 5. Controlled Fault / Trap Test
+    add_executable(fault_test.elf
+        ${COMMON_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/fault_test/src/main.cpp
+    )
+    target_link_options(fault_test.elf PRIVATE
+        -T${LINKER_SCRIPT} -Wl,-Map=fault_test.map)
+
+    # 6. Bidirectional IPC Ping-Pong Test
+    add_executable(ipc_ping_test.elf
+        ${COMMON_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/ipc_ping_test/src/main.cpp
+    )
+    target_link_options(ipc_ping_test.elf PRIVATE
+        -T${LINKER_SCRIPT} -Wl,-Map=ipc_ping_test.map)
 endif()
 
 # Linux-side IMU IPC demo: a host application, never cross-compiled for the E906.

@@ -54,6 +54,31 @@ FIRMWARE_TESTS = {
         expected_trace="timer_test: alive",
         description="CLINT counter and text-only RemoteProc trace buffer",
     ),
+    "smoke": FirmwareTest(
+        firmware_name="platform_smoke_test.elf",
+        expected_trace="platform smoke test",
+        description="GPIO pulse burst walking test with trace narrative",
+    ),
+    "hello": FirmwareTest(
+        firmware_name="hello_world.elf",
+        expected_trace="AbstractX Heartbeat",
+        description="C++20 coroutine scheduler, MTIME timer service, and trace log",
+    ),
+    "ipc": FirmwareTest(
+        firmware_name="ipc_benchmark.elf",
+        expected_trace="IPC Benchmark",
+        description="SRAM ring buffer and DRAM payload streaming benchmark",
+    ),
+    "fault": FirmwareTest(
+        firmware_name="fault_test.elf",
+        expected_trace="FATAL TRAP:",
+        description="Controlled exception trap, CSR capture, and crash reporting",
+    ),
+    "ping": FirmwareTest(
+        firmware_name="ipc_ping_test.elf",
+        expected_trace="ipc_ping_test: ready",
+        description="Bidirectional IPC ping-pong test over SRAM rings",
+    ),
 }
 
 
@@ -204,6 +229,78 @@ def wait_for_trace(path: Path, expected_text: str, timeout_seconds: float, inter
     return False
 
 
+def wait_for_ready(path: Path, timeout_seconds: float, interval_seconds: float, trace_source: Path | None = None) -> int:
+    if timeout_seconds <= 0 or interval_seconds <= 0:
+        raise ValueError("timeout and polling interval must be greater than zero")
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            status = read_status(path)
+            if status.is_valid():
+                if status.state == 2:  # ready
+                    print(f"Firmware ready: gen={status.generation}, core_hz={status.riscv_core_hz}")
+                    return 0
+                if status.state in (3, 4):  # init-failed, crashed
+                    print(f"Firmware {STATE_NAMES.get(status.state)}: failure={FAILURE_NAMES.get(status.failure_reason)}", file=sys.stderr)
+                    print_status(status)
+                    if trace_source and trace_source.exists():
+                        print("\n--- RSC_TRACE Buffer ---", file=sys.stderr)
+                        print(trace_source.read_text(encoding="utf-8", errors="replace").rstrip("\0"), file=sys.stderr)
+                    return 2
+        except Exception:
+            pass
+        time.sleep(interval_seconds)
+
+    print(f"FAIL: Timed out waiting for firmware ready after {timeout_seconds:g}s", file=sys.stderr)
+    if path.exists():
+        try:
+            print_status(read_status(path))
+        except Exception:
+            pass
+    if trace_source and trace_source.exists():
+        print("\n--- RSC_TRACE Buffer ---", file=sys.stderr)
+        print(trace_source.read_text(encoding="utf-8", errors="replace").rstrip("\0"), file=sys.stderr)
+    return 2
+
+
+def measure_timer_accuracy(trace_path: Path, sample_count: int = 5, interval_seconds: float = 1.0) -> int:
+    """Monitors timer trace output and calculates counter frequency against host clock."""
+    if sample_count < 2 or interval_seconds <= 0:
+        raise ValueError("sample_count must be at least 2 and interval must be positive")
+
+    print(f"Measuring timer counter accuracy over {sample_count} samples (interval {interval_seconds}s)...")
+    readings: list[tuple[float, int]] = []
+    prev_text = ""
+
+    while len(readings) < sample_count:
+        if trace_path.exists():
+            text = trace_path.read_text(encoding="utf-8", errors="replace").rstrip("\0")
+            if text != prev_text:
+                prev_text = text
+                for line in text.splitlines():
+                    if "mtime=" in line:
+                        try:
+                            val_str = line.split("mtime=")[-1].split(")")[0].strip()
+                            mtime_val = int(val_str, 0)
+                            host_now = time.monotonic()
+                            if not readings or readings[-1][1] != mtime_val:
+                                readings.append((host_now, mtime_val))
+                                print(f"  [Sample {len(readings)}/{sample_count}] host={host_now:.3f}s, mtime={mtime_val}")
+                        except Exception:
+                            pass
+        time.sleep(interval_seconds)
+
+    dt_host = readings[-1][0] - readings[0][0]
+    dmtime = readings[-1][1] - readings[0][1]
+    measured_hz = dmtime / dt_host if dt_host > 0 else 0.0
+
+    print(f"\n--- Timer Accuracy Result ---")
+    print(f"Elapsed host time: {dt_host:.4f} s")
+    print(f"Elapsed mtime:     {dmtime} ticks")
+    print(f"Measured frequency: {measured_hz:,.2f} Hz")
+    return 0
+
+
 def print_status(status: BootStatus) -> int:
     print(f"valid: {status.is_valid()}")
     print(f"generation: {status.generation}")
@@ -233,6 +330,77 @@ def self_test() -> int:
     return 0
 
 
+def run_all_tests(remoteproc_root: Path, remoteproc_id: int, firmware_dir: Path, trace_source: Path, timeout: float, interval: float, dry_run: bool) -> int:
+    rproc = remoteproc_path(remoteproc_root, remoteproc_id)
+    print("================================================================================")
+    print(f"Starting Automated RemoteProc Test Suite on {rproc}")
+    print(f"Firmware Directory: {firmware_dir}")
+    print(f"Trace Source:       {trace_source}")
+    print("================================================================================\n")
+
+    results: dict[str, tuple[bool, float, str]] = {}
+
+    for name, test in FIRMWARE_TESTS.items():
+        firmware = firmware_dir / test.firmware_name
+        print(f"--- Running Test: [{name.upper()}] ({test.firmware_name}) ---")
+        print(f"Description: {test.description}")
+        if not dry_run and not firmware.exists():
+            print(f"ERROR: Firmware file not found: {firmware}\n", file=sys.stderr)
+            results[name] = (False, 0.0, f"File not found: {firmware.name}")
+            continue
+
+        if dry_run:
+            print(f"DRY-RUN: stop -> load {firmware.name} -> start -> wait for {test.expected_trace!r} -> stop\n")
+            results[name] = (True, 0.0, "Dry run passed")
+            continue
+
+        start_time = time.monotonic()
+        try:
+            write_text(rproc / "state", "stop", False)
+            time.sleep(0.1)
+            write_text(rproc / "firmware", firmware.name, False)
+            write_text(rproc / "state", "start", False)
+            passed = wait_for_trace(trace_source, test.expected_trace, timeout, interval)
+            duration = time.monotonic() - start_time
+            write_text(rproc / "state", "stop", False)
+
+            if passed:
+                print(f"[PASS] {name} ({duration:.2f}s)\n")
+                results[name] = (True, duration, "Expected trace matched")
+            else:
+                print(f"[FAIL] {name} ({duration:.2f}s) - Timed out waiting for trace: {test.expected_trace!r}\n", file=sys.stderr)
+                results[name] = (False, duration, "Timeout / trace mismatch")
+
+        except Exception as err:
+            duration = time.monotonic() - start_time
+            print(f"[FAIL] {name} ({duration:.2f}s) - Exception: {err}\n", file=sys.stderr)
+            results[name] = (False, duration, str(err))
+
+    print("================================================================================")
+    print("                      REMOTEPROC TEST SUITE SUMMARY REPORT                      ")
+    print("================================================================================")
+    print(f"{'TEST NAME':<12} | {'FIRMWARE':<26} | {'STATUS':<8} | {'DURATION':<10} | {'NOTES'}")
+    print("-" * 80)
+    all_passed = True
+    for name, test in FIRMWARE_TESTS.items():
+        if name in results:
+            passed, dur, msg = results[name]
+            status_str = "PASS" if passed else "FAIL"
+            if not passed:
+                all_passed = False
+            print(f"{name:<12} | {test.firmware_name:<26} | {status_str:<8} | {dur:>7.2f}s   | {msg}")
+        else:
+            all_passed = False
+            print(f"{name:<12} | {test.firmware_name:<26} | {'SKIP':<8} | {'-':>10} | Not run")
+    print("=" * 80)
+
+    if all_passed:
+        print(">> ALL TESTS PASSED SUCCESSFULLY! <<\n")
+        return 0
+    print(">> SOME TESTS FAILED! <<\n", file=sys.stderr)
+    return 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--remoteproc-root", type=Path, default=Path("/sys/class/remoteproc"))
@@ -259,6 +427,12 @@ def parse_args() -> argparse.Namespace:
     status = subparsers.add_parser("read-status", help="decode a 64-byte firmware boot/crash record")
     status.add_argument("--device", type=Path, required=True, help="platform driver mapping IPC_BOOT_STATUS_ADDR")
 
+    wait_ready = subparsers.add_parser("wait-ready", help="wait for firmware to report ready state within a timeout")
+    wait_ready.add_argument("--device", type=Path, required=True, help="platform driver mapping IPC_BOOT_STATUS_ADDR")
+    wait_ready.add_argument("--trace-source", type=Path, help="optional trace0 path to dump on failure or timeout")
+    wait_ready.add_argument("--timeout", type=float, default=5.0, help="timeout in seconds (default: 5.0)")
+    wait_ready.add_argument("--interval", type=float, default=0.1, help="polling interval in seconds (default: 0.1)")
+
     descriptor = subparsers.add_parser("build-ipc", help="build a 16-byte IPC descriptor for a platform IPC driver")
     descriptor.add_argument("--type", choices=MESSAGE_TYPES, required=True)
     descriptor.add_argument("--payload-addr", type=lambda value: int(value, 0), required=True)
@@ -277,6 +451,11 @@ def parse_args() -> argparse.Namespace:
     watch.add_argument("--count", type=int, help="number of reads; omit to watch until interrupted")
 
     subparsers.add_parser("list-tests", help="list focused firmware tests available to run")
+    timer_acc = subparsers.add_parser("test-timer-accuracy", help="measure timer counter frequency and drift against host time")
+    timer_acc.add_argument("--trace-source", type=Path, required=True, help="path to trace0 debugfs stream")
+    timer_acc.add_argument("--samples", type=int, default=5, help="number of distinct mtime samples to collect (default: 5)")
+    timer_acc.add_argument("--interval", type=float, default=1.0, help="sample polling interval in seconds (default: 1.0)")
+
     run_test = subparsers.add_parser("run-test", help="load a firmware test and wait for its trace0 pass text")
     run_test.add_argument("--test", choices=FIRMWARE_TESTS, required=True)
     run_test.add_argument("--firmware-dir", type=Path, required=True)
@@ -284,6 +463,12 @@ def parse_args() -> argparse.Namespace:
     run_test.add_argument("--timeout", type=float, default=10.0)
     run_test.add_argument("--interval", type=float, default=0.25)
     run_test.add_argument("--keep-running", action="store_true")
+
+    run_all = subparsers.add_parser("run-all", help="automatically run all firmware tests sequentially with a consolidated report")
+    run_all.add_argument("--firmware-dir", type=Path, default=Path("/lib/firmware"), help="directory containing firmware ELFs (default: /lib/firmware)")
+    run_all.add_argument("--trace-source", type=Path, default=Path("/sys/kernel/debug/remoteproc/remoteproc0/trace0"), help="debugfs trace0 stream")
+    run_all.add_argument("--timeout", type=float, default=10.0, help="per-test timeout in seconds (default: 10.0)")
+    run_all.add_argument("--interval", type=float, default=0.25, help="polling interval in seconds (default: 0.25)")
 
     subparsers.add_parser("self-test", help="verify Python packing against the C++ ABI")
     return parser.parse_args()
@@ -297,6 +482,10 @@ def main() -> int:
         for name, test in FIRMWARE_TESTS.items():
             print(f"{name}: {test.firmware_name} — {test.description}")
         return 0
+    if args.command == "run-all":
+        return run_all_tests(args.remoteproc_root, args.remoteproc, args.firmware_dir, args.trace_source, args.timeout, args.interval, args.dry_run)
+    if args.command == "test-timer-accuracy":
+        return measure_timer_accuracy(args.trace_source, args.samples, args.interval)
     if args.command == "write-clock":
         config = ClockConfiguration(args.generation, args.riscv_core_hz, args.timer_counter_hz,
                                     args.uart_parent_hz, args.spi0_parent_hz, args.spi1_parent_hz, args.flags)
@@ -304,6 +493,8 @@ def main() -> int:
         return 0
     if args.command == "read-status":
         return print_status(read_status(args.device))
+    if args.command == "wait-ready":
+        return wait_for_ready(args.device, args.timeout, args.interval, args.trace_source)
     if args.command == "build-ipc":
         descriptor = IpcDescriptor(args.payload_addr, args.length, MESSAGE_TYPES[args.type],
                                    args.flags, args.timestamp_us)

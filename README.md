@@ -50,13 +50,19 @@ RISCV_Linux_T527_A733/
 ├── apps/
 │   ├── hello_world/               # Heartbeat, tracefs output & pin measurement
 │   ├── ipc_benchmark/             # SRAM SPSC ring + DRAM payload streaming
+│   ├── fault_test/                # Controlled exception & crash reporting verification
+│   ├── ipc_ping_test/             # Bidirectional IPC ping-pong & RTT latency test
+│   ├── platform_smoke_test/       # GPIO pin walking & routing test with trace
+│   ├── timer_test/                # CLINT mtime counter & 1 Hz trace heartbeat
 │   └── linux_imu_demo/            # Linux-side IPC example for IMU request/response flow
 ├── third_party/
 │   ├── etl/                       # Embedded Template Library
 │   ├── pigweed/                   # pw_tokenizer, pw_span, pw_status
 │   └── barectf/                   # Common Trace Format generator
 └── docs/
+    ├── REMOTEPROC_TEST_SUITE.md   # Step-by-step test suite & checkout guide
     ├── LINUX_DEVICE_TREE_GUIDE.md # Linux 7.1 RemoteProc, clocks & memory DT setup
+    ├── FIRMWARE_BRINGUP.md        # Memory layout, vectors, interrupt routing
     └── engineering_log.md         # Detailed architectural and engineering log
 ```
 

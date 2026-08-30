@@ -1,6 +1,7 @@
 #include <CppUTest/TestHarness.h>
 
 #include "hal/include/clock_config.hpp"
+#include "hal/include/hal_twi.hpp"
 
 namespace {
 
@@ -36,6 +37,22 @@ TEST(ClockConfiguration, RejectsIncompleteOrIncompatibleValues) {
     configuration = valid_configuration();
     configuration.abi_version++;
     CHECK_FALSE(configuration.is_valid());
+}
+
+TEST(ClockConfiguration, ComputesTwiClockDividersAccurately) {
+    // For 24 MHz parent and 400 kHz SCL: divisor = 60 -> 10 * (2^1) * (2+1) = 60 -> N=1, M=2 (CCR = 0x0A)
+    const uint32_t ccr_400k = hal::TwiDriver::compute_ccr(400000U, 24000000U);
+    const uint32_t n = (ccr_400k >> 3) & 0x07U;
+    const uint32_t m = ccr_400k & 0x07U;
+    const uint32_t scl_actual = 24000000U / (10U * (1U << n) * (m + 1U));
+    CHECK_EQUAL(400000U, scl_actual);
+
+    // For 24 MHz parent and 100 kHz SCL: divisor = 240 -> 10 * (2^3) * (2+1) = 240 -> N=3, M=2 (CCR = 0x1A)
+    const uint32_t ccr_100k = hal::TwiDriver::compute_ccr(100000U, 24000000U);
+    const uint32_t n_100k = (ccr_100k >> 3) & 0x07U;
+    const uint32_t m_100k = ccr_100k & 0x07U;
+    const uint32_t scl_100k_actual = 24000000U / (10U * (1U << n_100k) * (m_100k + 1U));
+    CHECK_EQUAL(100000U, scl_100k_actual);
 }
 
 } // namespace

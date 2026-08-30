@@ -36,7 +36,7 @@ public:
         volatile uint32_t FCR;        // 0x18: FIFO Control
         volatile uint32_t FSR;        // 0x1C: FIFO Status
         volatile uint32_t WCR;        // 0x20: Wait Clock Counter
-        volatile uint32_t RESERVED2;  // 0x24
+        volatile uint32_t CCR;        // 0x24: Clock Control Register
         volatile uint32_t SAMP_DL;    // 0x28: Sample Delay Control
         volatile uint32_t RESERVED3;  // 0x2C
         volatile uint32_t MBC;        // 0x30: Master Burst Counter
@@ -59,14 +59,40 @@ public:
 
     static_assert(offsetof(Regs, GCR) == 0x04, "SPI_GCR offset");
     static_assert(offsetof(Regs, ISR) == 0x14, "SPI_ISR offset");
+    static_assert(offsetof(Regs, CCR) == 0x24, "SPI_CCR offset");
     static_assert(offsetof(Regs, MBC) == 0x30, "SPI_MBC offset");
     static_assert(offsetof(Regs, TXD) == 0x200, "SPI_TXD offset");
     static_assert(offsetof(Regs, RXD) == 0x300, "SPI_RXD offset");
     static_assert(offsetof(Regs, BSR) == 0x400, "SPI_BSR offset");
 
-    static inline void init(uint32_t spi_base_addr, SpiMode mode = SpiMode::SINGLE_IO, uint32_t clock_hz = 25000000) {
+    static inline void set_frequency(uint32_t spi_base_addr, uint32_t target_hz, uint32_t parent_hz = 200000000U) noexcept {
+        if (target_hz == 0U) {
+            return;
+        }
+        if (parent_hz == 0U) {
+            parent_hz = 200000000U;
+        }
         auto* regs = get_regs(spi_base_addr);
-        (void)clock_hz;
+
+        // Mode 1: CDR2 (linear divider: SCLK = parent / (2 * (CDR2 + 1)))
+        const uint32_t div = parent_hz / (2U * target_hz);
+        if (div >= 1U && div <= 256U) {
+            regs->CCR = (div - 1U); // DRS=0, CDR2=div-1
+        } else {
+            // Mode 2: CDR1 (power of 2: SCLK = parent / (2^CDR1))
+            uint32_t cdr1 = 0;
+            uint32_t cur = parent_hz;
+            while (cur > target_hz && cdr1 < 15U) {
+                cur >>= 1U;
+                cdr1++;
+            }
+            regs->CCR = (1U << 12) | ((cdr1 & 0x0FU) << 8);
+        }
+    }
+
+    static inline void init(uint32_t spi_base_addr, SpiMode mode = SpiMode::SINGLE_IO,
+                            uint32_t target_hz = 25000000U, uint32_t parent_hz = 200000000U) {
+        auto* regs = get_regs(spi_base_addr);
 
         // Reset and enable Master Mode
         regs->GCR = 0x80000000; // Reset
@@ -78,6 +104,8 @@ public:
         } else {
             regs->TCR = (1 << 2); // Standard single SPI
         }
+
+        set_frequency(spi_base_addr, target_hz, parent_hz);
 
         // Enable Transfer Complete (TC) Interrupt
         regs->IER = (1 << 12); // TC_INT_EN
@@ -124,7 +152,7 @@ public:
         void await_suspend(std::coroutine_handle<> h) noexcept {
             handle = h;
             queue_transfer_request(spi_base, h, tx_data, rx_data);
-            start_transfer(spi_base, tx_data, rx_data.size());
+            try_start_next_transfer(spi_base);
         }
 
         void await_resume() const noexcept {}
@@ -149,20 +177,51 @@ private:
         return (base == SPI0_BASE) ? pending_spi0_requests_ : pending_spi1_requests_;
     }
 
+    static inline TransferRequest& active_request_for(uint32_t base) noexcept {
+        return (base == SPI0_BASE) ? active_spi0_request_ : active_spi1_request_;
+    }
+
+    static inline bool& busy_for(uint32_t base) noexcept {
+        return (base == SPI0_BASE) ? busy_spi0_ : busy_spi1_;
+    }
+
+    static inline void try_start_next_transfer(uint32_t base) noexcept {
+        const uint32_t flags = abstractx::disable_interrupts_save_flags();
+        bool& busy = busy_for(base);
+        if (!busy) {
+            TransferRequest req{};
+            if (pop_transfer_request(base, req)) {
+                busy = true;
+                active_request_for(base) = req;
+                start_transfer(base, req.tx_data, req.rx_data.size());
+            }
+        }
+        abstractx::restore_interrupts_flags(flags);
+    }
+
     static inline void complete_transfer_from_isr(uint32_t base) noexcept {
         auto* regs = get_regs(base);
         regs->ISR = (1 << 12); // Clear TC flag
 
-        TransferRequest req{};
-        if (!pop_transfer_request(base, req)) {
-            return;
-        }
-
+        TransferRequest req = active_request_for(base);
         for (size_t i = 0; i < req.rx_data.size(); ++i) {
             req.rx_data[i] = static_cast<uint8_t>(regs->RXD);
         }
 
-        abstractx::IsrDispatcher::post(req.handle);
+        bool& busy = busy_for(base);
+        TransferRequest next_req{};
+        if (pop_transfer_request(base, next_req)) {
+            busy = true;
+            active_request_for(base) = next_req;
+            start_transfer(base, next_req.tx_data, next_req.rx_data.size());
+        } else {
+            busy = false;
+            active_request_for(base) = TransferRequest{};
+        }
+
+        if (req.handle) {
+            abstractx::IsrDispatcher::post(req.handle);
+        }
     }
 
     static inline Regs* get_regs(uint32_t base) noexcept {
@@ -185,9 +244,13 @@ private:
         regs->TCR |= (1 << 31);
     }
 
-    // One dedicated queue per bus instance: each SPI ISR is its own consumer.
+    // Dedicated request queues and active state per bus instance
     static inline RequestQueue pending_spi0_requests_{};
     static inline RequestQueue pending_spi1_requests_{};
+    static inline TransferRequest active_spi0_request_{};
+    static inline TransferRequest active_spi1_request_{};
+    static inline bool busy_spi0_{false};
+    static inline bool busy_spi1_{false};
 };
 
 } // namespace hal

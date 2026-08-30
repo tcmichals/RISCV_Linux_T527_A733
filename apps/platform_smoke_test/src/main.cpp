@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "hal_gpio.hpp"
+#include "hal_trace.hpp"
 #include "memory_map.h"
 
 namespace {
@@ -58,6 +59,9 @@ constexpr uint32_t kBurstGap = 3000000;       // ~10 ms low between bursts
 } // namespace
 
 extern "C" int main() {
+    hal::Trace::init();
+    hal::Trace::puts("[riscv] platform smoke test starting pin pulse sweep\n");
+
     for (uint32_t i = 0; i < kPinCount; ++i) {
         hal::Gpio::configure_pin(kPins[i].port, kPins[i].pin, hal::PinMode::OUTPUT);
         hal::Gpio::clear_pin(kPins[i].port, kPins[i].pin);
@@ -65,6 +69,10 @@ extern "C" int main() {
 
     while (true) {
         for (uint32_t i = 0; i < kPinCount; ++i) {
+            hal::Trace::puts("[riscv] pulsing pin: ");
+            hal::Trace::puts(kPins[i].name);
+            hal::Trace::puts("\n");
+
             const uint32_t pulses = i + 1U;
             for (uint32_t p = 0; p < pulses; ++p) {
                 hal::Gpio::set_pin(kPins[i].port, kPins[i].pin);

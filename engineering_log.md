@@ -132,16 +132,21 @@ handler, undocumented bindings).
 #### State
 
 All four firmware ELFs cross-compile and link cleanly with xPack GCC 15.2.0.
-ITCM 0.4%, DTCM 9.2%, SRAM_CODE 32.9%, 4 KB reserved stack.
+ITCM 0.4%, DTCM 8.7–9.2%, SRAM_CODE <= 32.9%, 4 KB reserved stack headroom maintained.
+Host CppUTest simulation test suite 100% passing (17 tests).
+
+- **UART TX Queue:** Migrated from single handle pointer to `hal::DriverRequestQueue<WriteRequest, 8>` drained by `handle_tx_dma_isr()`.
+- **Dynamic Clock Calculations:** Peripheral clock rate divisors implemented and verified in `UartDmaDriver::init()`, `SpiDmaDriver::set_frequency()`, and `TwiDriver::compute_ccr()` using parent clocks from `ClockConfiguration`.
+- **RemoteProc Control CLI:** Added `wait-ready` command and registered all test images (`timer`, `smoke`, `hello`, `ipc`) into `remoteproc_control.py`.
+- **Test Harness Compatibility:** Configured CMake policies and `CPPUTEST_USE_MEM_LEAK_DETECTION=0` to eliminate placement-new macro collisions with ETL.
 
 **Not yet on hardware.** Blocking items before first boot attempt:
 1. PMA / `RISCV_SYSMAP` (`0xEFFF_F000`) unprogrammed — required before enabling
    D-cache, or the IPC rings break silently.
 2. Core clock unverified; 600 MHz is a fallback constant.
-3. UART baud divisor assumes a 24 MHz APB.
-4. 40-pin header routing unconfirmed — `gpioinfo` proves what is unused, not what
+3. 40-pin header routing unconfirmed — `gpioinfo` proves what is unused, not what
    is routed.
-5. `SPI0` needs a per-transfer mode field to alternate dual-IO and single-IO.
+4. `SPI0` needs a per-transfer mode field to alternate dual-IO and single-IO.
 
 See [docs/FIRMWARE_BRINGUP.md](docs/FIRMWARE_BRINGUP.md) for boot sequence,
 interrupt routing, fault reporting, and hardware verification commands.

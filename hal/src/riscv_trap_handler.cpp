@@ -10,8 +10,11 @@
 #include "hal_clic.hpp"
 #include "hal_gpio.hpp"
 #include "hal_msgbox.hpp"
+#include "hal_spi_dma.hpp"
 #include "hal_timer.hpp"
 #include "hal_trace.hpp"
+#include "hal_twi.hpp"
+#include "hal_uart_dma.hpp"
 
 namespace {
 
@@ -89,6 +92,25 @@ void dispatch_external(uint32_t clic_id) noexcept {
         case hal::ClicIrq::RiscvMsgbox:
         case hal::ClicIrq::CpusMsgboxRiscv:
             hal::MsgboxDriver::handle_isr();
+            break;
+        case hal::ClicIrq::SUart0:
+        case hal::ClicIrq::SUart1:
+            hal::UartDmaDriver::handle_isr();
+            break;
+        case hal::ClicIrq::STwi0:
+            hal::TwiDriver::handle_isr(S_TWI0_BASE);
+            break;
+        case hal::ClicIrq::STwi1:
+            hal::TwiDriver::handle_isr(S_TWI1_BASE);
+            break;
+        case hal::ClicIrq::STwi2:
+            hal::TwiDriver::handle_isr(S_TWI2_BASE);
+            break;
+        case hal::ClicIrq::SSpi:
+            hal::SpiDmaDriver::handle_spi1_isr();
+            break;
+        case hal::ClicIrq::GicGroup48_55:
+            hal::SpiDmaDriver::handle_spi0_isr();
             break;
         default:
             // Unclaimed source: disable it rather than allow an interrupt storm.
