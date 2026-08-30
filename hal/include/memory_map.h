@@ -21,19 +21,21 @@ extern "C" {
 #define DTCM_BASE               0x00080000U
 #define DTCM_SIZE               0x00010000U /* 64 KB (Stack @ 0x00090000) */
 
-#define SRAM_SHARED_BASE        0x07130000U /* Shared SRAM C (320 KB) */
-#define SRAM_SHARED_SIZE        0x00050000U
+#define SRAM_SHARED_BASE        0x07130000U /* SRAM C low window, RISC-V local view */
+#define SRAM_SHARED_SIZE        0x00010000U /* 64 KB reserved for IPC; code starts at 0x07140000 */
 
-/* SPSC Ring Buffers in Shared SRAM C */
-#define IPC_SPSC_TX_RING_ADDR   0x07130000U /* E907/E902 -> Linux (16 KB) */
-#define IPC_SPSC_RX_RING_ADDR   0x07134000U /* Linux -> E907/E902 (16 KB) */
-#define IPC_TRACE_BUFFER_ADDR   0x07138000U /* BareCTF Trace Buffer (32 KB) */
-#define IPC_CLOCK_CONFIG_ADDR   0x07140000U /* Linux -> firmware clock ABI (4 KB) */
-#define IPC_CLOCK_CONFIG_SIZE   0x00001000U
-#define IPC_BOOT_STATUS_ADDR    0x07141000U /* Firmware -> Linux boot/crash ABI (4 KB) */
+/* IPC & diagnostics layout inside the 64 KB SRAM C shared window.
+ * Offsets are page aligned so the region ends exactly at the code window. */
+#define IPC_BOOT_STATUS_ADDR    0x07130000U /* Firmware -> Linux boot/crash ABI (4 KB) */
 #define IPC_BOOT_STATUS_SIZE    0x00001000U
+#define IPC_CLOCK_CONFIG_ADDR   0x07131000U /* Linux -> firmware clock ABI (4 KB) */
+#define IPC_CLOCK_CONFIG_SIZE   0x00001000U
+#define IPC_SPSC_TX_RING_ADDR   0x07132000U /* E906 -> Linux (8 KB) */
+#define IPC_SPSC_RX_RING_ADDR   0x07134000U /* Linux -> E906 (8 KB) */
+#define IPC_TRACE_BUFFER_ADDR   0x07136000U /* BareCTF trace buffer (32 KB) */
+#define IPC_TRACE_BUFFER_SIZE   0x00008000U
 
-#define SRAM_DEDICATED_BASE     0x07280000U /* Dedicated RISC-V SRAM (256 KB) */
+#define SRAM_DEDICATED_BASE     0x07280000U /* SRAMA3_0, Linux PA view (riscvsram0) */
 #define SRAM_DEDICATED_SIZE     0x00040000U
 
 #define DRAM_RESERVED_BASE      0x48000000U /* Off-chip DRAM reserved by Linux */
@@ -59,23 +61,37 @@ extern "C" {
 /* SPIs */
 #define SPI0_BASE               0x04025000U /* High-Speed Dual-IO SPI */
 #define SPI1_BASE               0x04026000U /* Single-IO IMU SPI */
+#define S_SPI0_BASE             0x07092000U /* MCU-domain SPI (CLIC 76) */
+
+/* TWI / I2C, MCU domain: direct CLIC lines 68 / 69 / 60 */
+#define S_TWI0_BASE             0x07081400U
+#define S_TWI1_BASE             0x07081800U
+#define S_TWI2_BASE             0x07081C00U
+
+/* MCU-domain UARTs: direct CLIC lines 66 / 67 */
+#define S_UART0_BASE            0x07080000U
+#define S_UART1_BASE            0x07080400U
 
 /* GPIO / PIO */
 #define PIO_BASE                0x02000000U /* Main GPIO */
-#define R_PIO_BASE              0x07022000U /* Low-Power / CPUS GPIO */
+#define R_PIO_BASE              0x07022000U /* Low-Power / CPUS GPIO (PL, PM) */
+#define S_INTC_BASE             0x07021000U /* GIC -> CLIC group forwarding */
 
 /* DMA Controllers */
 #define SYS_DMA_BASE            0x03002000U /* Main System DMA */
 
 /* Hardware Mailbox / Doorbell */
-#define MSGBOX_BASE             0x03003000U /* Hardware Mailbox */
+#define MSGBOX_BASE             0x03003000U /* CPUX_MSGBOX: ring the doorbell to Linux */
+#define RISCV_MSGBOX_BASE       0x07136000U /* RISCV_MSGBOX, CPUX view (CLIC 17 on receive) */
 
-/* Interrupt Controllers */
-#define PLIC_BASE               0x10000000U /* E907 Platform-Level Interrupt Controller */
-#define RISCV_CLINT_BASE        0xE0000000U /* T527/A733 RISC-V CLINT/TCIP aperture */
-#define RISCV_MTIMECMP_ADDR     (RISCV_CLINT_BASE + 0x00004000U) /* Hart 0, standard CLINT layout */
-#define RISCV_MTIME_ADDR        (RISCV_CLINT_BASE + 0x0000BFF8U) /* Standard CLINT layout */
-#define CLIC_BASE               0xE0800000U /* T527/A733 RISC-V Core-Local Interrupt Controller */
+/* Interrupt Controllers.
+ * The E906 has no PLIC: external interrupts arrive through the CLIC. */
+#define RISCV_CLINT_BASE        0xE0000000U /* Machine timer, 64 KB */
+#define RISCV_MTIMECMP_ADDR     (RISCV_CLINT_BASE + 0x00004000U)
+#define RISCV_MTIME_ADDR        (RISCV_CLINT_BASE + 0x0000BFF8U)
+#define CLIC_BASE               0xE0800000U /* Core-Local Interrupt Controller, 20 KB */
+#define RISCV_SYSMAP_BASE       0xEFFFF000U /* Memory attribute (cacheable) control, 4 KB */
+#define RISCV_CFG_BASE          0x07130000U /* CPUX view only: boot address at +0x204 */
 
 #ifdef __cplusplus
 }

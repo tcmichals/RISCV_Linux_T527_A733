@@ -94,6 +94,19 @@ _start:
     la t0, _start_vector
     csrw mtvec, t0
 
+    /* The relocation loops above wrote code as data, so the instruction stream
+     * for ITCM/SRAM_CODE must be re-fetched before any of it is executed.
+     */
+#ifdef ENABLE_XUANTIE_ICACHE
+    /* XuanTie mcor (0x7C2): invalidate I-cache. mhcr (0x7C1) bit 0: I-cache enable.
+     * Verify both encodings against the E907 manual before trusting on silicon.
+     */
+    li t0, 0x11
+    csrw 0x7c2, t0
+    csrsi 0x7c1, 1
+#endif
+    fence.i
+
     /* Call C++ Static Constructors */
     la t0, __libc_init_array
     beqz t0, 9f
@@ -109,8 +122,46 @@ _infinite_loop:
     j _infinite_loop
 
     .section .fastcode, "ax"
-    .align 4
+    .align 6
 _trap_entry:
-    /* Direct PLIC/CLIC Dispatcher Trampoline */
+    /* The handler is ordinary C++, so every caller-saved register must be
+     * preserved here or the interrupted coroutine resumes with corrupt state.
+     */
+    addi sp, sp, -64
+    sw   ra,  0(sp)
+    sw   t0,  4(sp)
+    sw   t1,  8(sp)
+    sw   t2, 12(sp)
+    sw   a0, 16(sp)
+    sw   a1, 20(sp)
+    sw   a2, 24(sp)
+    sw   a3, 28(sp)
+    sw   a4, 32(sp)
+    sw   a5, 36(sp)
+    sw   a6, 40(sp)
+    sw   a7, 44(sp)
+    sw   t3, 48(sp)
+    sw   t4, 52(sp)
+    sw   t5, 56(sp)
+    sw   t6, 60(sp)
+
     call riscv_trap_handler
+
+    lw   ra,  0(sp)
+    lw   t0,  4(sp)
+    lw   t1,  8(sp)
+    lw   t2, 12(sp)
+    lw   a0, 16(sp)
+    lw   a1, 20(sp)
+    lw   a2, 24(sp)
+    lw   a3, 28(sp)
+    lw   a4, 32(sp)
+    lw   a5, 36(sp)
+    lw   a6, 40(sp)
+    lw   a7, 44(sp)
+    lw   t3, 48(sp)
+    lw   t4, 52(sp)
+    lw   t5, 56(sp)
+    lw   t6, 60(sp)
+    addi sp, sp, 64
     mret

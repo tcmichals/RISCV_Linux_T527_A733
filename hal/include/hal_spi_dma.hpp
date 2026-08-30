@@ -7,6 +7,7 @@
 #ifndef HAL_SPI_DMA_HPP
 #define HAL_SPI_DMA_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <coroutine>
 #include <span>
@@ -23,21 +24,45 @@ enum class SpiMode : uint8_t {
 
 class SpiDmaDriver {
 public:
-    struct alignas(32) Regs {
-        volatile uint32_t GCR;     // 0x04: Global Control Register
-        volatile uint32_t TCR;     // 0x08: Transfer Control Register
-        volatile uint32_t IER;     // 0x10: Interrupt Enable Register
-        volatile uint32_t ISR;     // 0x14: Interrupt Status Register
-        volatile uint32_t FCR;     // 0x18: FIFO Control Register
-        volatile uint32_t FSR;     // 0x1C: FIFO Status Register
-        volatile uint32_t WCR;     // 0x20: Wait Clock Register
-        volatile uint32_t CCR;     // 0x24: Clock Rate Control Register
-        volatile uint32_t MBC;     // 0x30: Master Burst Counter
-        volatile uint32_t MTC;     // 0x34: Master Transmit Counter
-        volatile uint32_t BDC;     // 0x38: Master Burst Dummy Counter
-        volatile uint32_t TXD;     // 0x200: TX Data Register
-        volatile uint32_t RXD;     // 0x300: RX Data Register
+    // Offsets per T527 UM 8.x SPI register list. Padding is explicit because the
+    // register file is sparse: TXD is at 0x200 and RXD at 0x300.
+    struct Regs {
+        volatile uint32_t RESERVED0;  // 0x00
+        volatile uint32_t GCR;        // 0x04: Global Control
+        volatile uint32_t TCR;        // 0x08: Transfer Control
+        volatile uint32_t RESERVED1;  // 0x0C
+        volatile uint32_t IER;        // 0x10: Interrupt Control
+        volatile uint32_t ISR;        // 0x14: Interrupt Status
+        volatile uint32_t FCR;        // 0x18: FIFO Control
+        volatile uint32_t FSR;        // 0x1C: FIFO Status
+        volatile uint32_t WCR;        // 0x20: Wait Clock Counter
+        volatile uint32_t RESERVED2;  // 0x24
+        volatile uint32_t SAMP_DL;    // 0x28: Sample Delay Control
+        volatile uint32_t RESERVED3;  // 0x2C
+        volatile uint32_t MBC;        // 0x30: Master Burst Counter
+        volatile uint32_t MTC;        // 0x34: Master Transmit Counter
+        volatile uint32_t BCC;        // 0x38: Master Burst Control Counter
+        volatile uint32_t RESERVED4;  // 0x3C
+        volatile uint32_t BATCR;      // 0x40: Bit-Aligned Transfer Config
+        volatile uint32_t RESERVED5;  // 0x44
+        volatile uint32_t TBR;        // 0x48: TX Bit
+        volatile uint32_t RBR;        // 0x4C: RX Bit
+        volatile uint32_t RESERVED6[14]; // 0x50-0x87
+        volatile uint32_t NDMA_MODE_CTL; // 0x88: Normal DMA Mode Control
+        volatile uint32_t RESERVED7[93]; // 0x8C-0x1FF
+        volatile uint32_t TXD;        // 0x200: TX Data
+        volatile uint32_t RESERVED8[63]; // 0x204-0x2FF
+        volatile uint32_t RXD;        // 0x300: RX Data
+        volatile uint32_t RESERVED9[63]; // 0x304-0x3FF
+        volatile uint32_t BSR;        // 0x400: BUF Status
     };
+
+    static_assert(offsetof(Regs, GCR) == 0x04, "SPI_GCR offset");
+    static_assert(offsetof(Regs, ISR) == 0x14, "SPI_ISR offset");
+    static_assert(offsetof(Regs, MBC) == 0x30, "SPI_MBC offset");
+    static_assert(offsetof(Regs, TXD) == 0x200, "SPI_TXD offset");
+    static_assert(offsetof(Regs, RXD) == 0x300, "SPI_RXD offset");
+    static_assert(offsetof(Regs, BSR) == 0x400, "SPI_BSR offset");
 
     static inline void init(uint32_t spi_base_addr, SpiMode mode = SpiMode::SINGLE_IO, uint32_t clock_hz = 25000000) {
         auto* regs = get_regs(spi_base_addr);
@@ -150,7 +175,7 @@ private:
 
         regs->MBC = static_cast<uint32_t>(total_len);
         regs->MTC = static_cast<uint32_t>(tx.size());
-        regs->BDC = 0;
+        regs->BCC = 0;
 
         for (auto b : tx) {
             regs->TXD = b;

@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include "memory_map.h"
+
 #define RSC_CARVEOUT    0
 #define RSC_DEVTREE     1
 #define RSC_TRACE       2
@@ -37,9 +39,9 @@ const struct my_resource_table rproc_resource_table = {
     },
     .trace = {
         .type = RSC_TRACE,
-        .da = 0x07138000, /* IPC_TRACE_BUFFER_ADDR in SRAM C */
-        .len = 0x8000,    /* 32 KB trace buffer */
+        .da = IPC_TRACE_BUFFER_ADDR,
+        .len = IPC_TRACE_BUFFER_SIZE,
         .reserved = 0,
-        .name = "trace:e907",
+        .name = "trace:e906",
     },
 };

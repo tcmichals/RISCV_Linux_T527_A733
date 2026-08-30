@@ -1,24 +1,29 @@
 /*
- * Linker Script for Allwinner T527 & A733 RISC-V Coprocessor
- * Maps ITCM, DTCM, Shared SRAM C, Dedicated SRAM, and DRAM
+ * Linker Script for the Allwinner T527 RISC-V (E906) Coprocessor
+ *
+ * Regions match the layout validated on T527 hardware by the cubie-a5e
+ * ioProcessor firmware: SRAM C is 320 KB at 0x07130000 in the RISC-V local
+ * view, split into a 64 KB IPC window and a 256 KB code window at 0x07140000.
+ * The CPUX/Linux view of 0x07130000 is the RV_CFG register block; do not
+ * confuse the two address spaces.
  */
 
 OUTPUT_ARCH("riscv")
 ENTRY(_start)
 
+STACK_SIZE = 4K;
+
 MEMORY
 {
     /* Zero-Wait Tightly Coupled Memory */
     ITCM        (rx)  : ORIGIN = 0x00000000, LENGTH = 64K
-    DTCM        (rw)  : ORIGIN = 0x00080000, LENGTH = 64K
+    DTCM        (rwx) : ORIGIN = 0x00080000, LENGTH = 64K
 
-    /* Shared On-Chip SRAM C: SPSC control words, counters, doorbells, ring metadata.
-     * Keep this fully in SRAM so the ring state stays low-latency and cache-stable.
-     */
+    /* SRAM C low window: SPSC control words, counters, doorbells, trace buffer. */
     SRAM_SHARED (rw)  : ORIGIN = 0x07130000, LENGTH = 64K
 
-    /* Dedicated RISC-V SRAM (Active execution) */
-    SRAM_CODE   (rx)  : ORIGIN = 0x07280000, LENGTH = 256K
+    /* SRAM C code window: runtime text and the coroutine frame pool. */
+    SRAM_CODE   (rwx) : ORIGIN = 0x07140000, LENGTH = 256K
 
     /* DRAM regions:
      *  - DRAM_INIT: one-time init / relocation image
@@ -32,8 +37,6 @@ MEMORY
     DRAM_INIT   (rx)  : ORIGIN = 0x48000000, LENGTH = 1M
     DRAM_BUF    (rw)  : ORIGIN = 0x48100000, LENGTH = 15M
 }
-
-_estack = ORIGIN(DTCM) + LENGTH(DTCM); /* Stack at 0x00090000 */
 
 SECTIONS
 {
@@ -98,6 +101,26 @@ SECTIONS
         end = .;
         _end = .;
     } > DTCM
+
+    /* 5b. Explicitly reserved stack, so overflow is a link error rather than a
+     * silent collision with BSS at run time.
+     */
+    .stack (NOLOAD) : {
+        . = ALIGN(16);
+        _sstack = .;
+        . = . + STACK_SIZE;
+        . = ALIGN(16);
+        _estack = .;
+    } > DTCM
+
+    /* 5c. Coroutine frames live in the SRAM C code window, not DTCM. */
+    .coro_frame_pool (NOLOAD) : {
+        . = ALIGN(64);
+        _scoro_pool = .;
+        *(.coro_frame_pool)
+        *(.coro_frame_pool.*)
+        _ecoro_pool = .;
+    } > SRAM_CODE
 
     /* 6. SPSC ring control / counters / descriptors remain in SRAM_SHARED.
      * These counters must stay hot, single-copy, and cache-stable for lock-free traffic.

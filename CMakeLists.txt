@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_CPPUTEST_TESTS "Enable CppUTest-based host simulation tests" ON)
 option(BUILD_RISCV_FIRMWARE "Build bare-metal RISC-V firmware targets" ON)
+# CSR encodings for mhcr/mcor are unverified against the E906 manual; opt in only
+# after confirming on silicon.
+option(ENABLE_XUANTIE_ICACHE "Enable the XuanTie instruction cache at startup" OFF)
 
 add_subdirectory(third_party/pigweed)
 
@@ -17,6 +20,13 @@ if(BUILD_RISCV_FIRMWARE)
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/etl/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/barectf
     )
+
+    # Keep coroutine frames out of the 64 KB DTCM that also carries the stack.
+    add_compile_definitions(ABSTRACTX_CORO_POOL_SECTION=".coro_frame_pool")
+
+    if(ENABLE_XUANTIE_ICACHE)
+        add_compile_definitions(ENABLE_XUANTIE_ICACHE)
+    endif()
 endif()
 
 if(BUILD_CPPUTEST_TESTS)
@@ -56,7 +66,18 @@ if(BUILD_RISCV_FIRMWARE)
     )
     target_link_options(timer_test.elf PRIVATE -T${LINKER_SCRIPT} -Wl,-Map=timer_test.map)
 
-    # 4. Linux-side IMU IPC Demo App
+    # 4. Pin routing smoke test: walks every RISC-V-owned pin with an
+    #    identifying pulse burst so the 40-pin header can be probed.
+    add_executable(platform_smoke_test.elf
+        ${COMMON_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/platform_smoke_test/src/main.cpp
+    )
+    target_link_options(platform_smoke_test.elf PRIVATE
+        -T${LINKER_SCRIPT} -Wl,-Map=platform_smoke_test.map)
+endif()
+
+# Linux-side IMU IPC demo: a host application, never cross-compiled for the E906.
+if(NOT CMAKE_CROSSCOMPILING)
     add_executable(linux_imu_demo
         ${CMAKE_CURRENT_SOURCE_DIR}/apps/linux_imu_demo/src/main.cpp
     )

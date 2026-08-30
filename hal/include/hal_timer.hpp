@@ -76,7 +76,7 @@ public:
     static inline void handle_isr() noexcept {
         // Rearm timer for next tick
         arm_next_tick();
-        ++timer_interrupt_count_;
+        timer_interrupt_count_ = timer_interrupt_count_ + 1U;
 
         // Feed AbstractX timer wheel
         abstractx::GenericTimerService<32>::tick(1);
